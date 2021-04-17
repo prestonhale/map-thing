@@ -4,9 +4,13 @@ import math
 # Player position on map
 # Discover areas as the player progresses
 # Doors that appear on map
+# CoLoRs
+# Better error handling
+# Better clarity around what 0,0 represents
 
-# TODO:
-# Remove extraneous horizontal connectors
+# TODO Bugs:
+# A map that is not connected properly can cause a forever hang
+
 class Position:
     def __init__(self, x, y):
         self.x = x
@@ -22,11 +26,12 @@ class Position:
         int_x = int(x.strip())
         int_y = int(y.strip())
         return Position(int_x, int_y)
+
     
     def forward(self):
         return Position(self.x, self.y + 1)
 
-    def backward(self):
+    def back(self):
         return Position(self.x, self.y - 1)
 
     def left(self):
@@ -36,22 +41,61 @@ class Position:
         return Position(self.x + 1, self.y)
 
 class Map:
+    # Mutable
+    map_array = None
+    player_location = None
+
+    # Non-mutable
+    justification = 3 # must be odd
+    player_icon = "X"
+    room_icon = "0"
+    v_conn_icon = "|"
+    h_conn_icon = "-"
+    empty_icon = " "
+
+    # Print the map to stdout
     def display(self):
-        empty = "".center(5)
-        vertical_connector = "|".center(5)
-        room = "o".center(5, "-")
-        print(empty + room + empty)
-        print(empty + vertical_connector + empty)
-        print(room + room + room)
-        print(empty + vertical_connector + empty)
-        print(empty + room + empty)
+        if self.map_array is None:
+            print("Map has not been initialized")
+            return
+
+        for y, row in enumerate(self.map_array):
+            row_string = ""
+            for x, item in enumerate(row):
+                if (
+                    self.player_location is not None 
+                    and self.player_location.x == x
+                    and self.player_location.y == y
+                ):
+                    row_string += self.player_icon.center(self.justification)
+                elif item == "room":
+                    row_string += self.room_icon.center(self.justification)
+                elif item == "h_conn":
+                    row_string += self.h_conn_icon * self.justification
+                elif item == "v_conn":
+                    row_string += self.v_conn_icon.center(self.justification)
+                else:
+                    row_string += self.empty_icon.center(self.justification)
+            print(row_string)
     
+    def update_player(self, direction):
+        if direction == "forward":
+            self.player_location.y -= 2 # Because map is oriented "backwards"
+        elif direction == "back":
+            self.player_location.y += 2 # Because map is oriented "backwards"
+        elif direction == "right":
+            self.player_location.x += 2
+        elif direction == "left":
+            self.player_location.x -= 2
+        else:
+            print("Unrecognized direction")
     # Room Interface
     # left
     # right
     # forward
     # back 
     def generate_map_from_first_room(self, first_room):
+        print("Generating map:")
         # =====================================================================
         # Generate a dictionary mapping string describing a position to strings
         # describing a room
@@ -62,9 +106,6 @@ class Map:
         queue = [(Position(0,0), first_room)]
 
         while len(queue) > 0:
-            print("=====")
-            for (b, v) in queue:
-                print(f"{b}, {v}")
             # Add room to dictionary of positions
             cur_pos, cur_room = queue.pop()
             map_dict[str(cur_pos)] = "room"
@@ -73,22 +114,21 @@ class Map:
             # also add connected rooms to "to-do" list
             # TODO: Ugly
             if str(cur_pos.forward()) not in map_dict and cur_room.forward is not None:
-                map_dict[str(cur_pos.forward())] = "connector"
+                map_dict[str(cur_pos.forward())] = "v_conn"
                 queue.append((cur_pos.forward().forward(), cur_room.forward))
-            if str(cur_pos.backward()) not in map_dict and cur_room.backward is not None:
-                map_dict[str(cur_pos.backward())] = "connector"
-                queue.append((cur_pos.backward().backward(), cur_room.backward))
+            if str(cur_pos.back()) not in map_dict and cur_room.back is not None:
+                map_dict[str(cur_pos.back())] = "v_conn"
+                queue.append((cur_pos.back().back(), cur_room.back))
             if str(cur_pos.right()) not in map_dict and cur_room.right is not None:
-                map_dict[str(cur_pos.right())] = "connector"
+                map_dict[str(cur_pos.right())] = "h_conn"
                 queue.append((cur_pos.right().right(), cur_room.right))
             if str(cur_pos.left()) not in map_dict and cur_room.left is not None:
-                map_dict[str(cur_pos.left())] = "connector"
+                map_dict[str(cur_pos.left())] = "h_conn"
                 queue.append((cur_pos.left().left(), cur_room.left))
 
-        print(map_dict)
         # =====================================================================
         # Turn map dictionary into a 2d array that represents the map
-        # TODO: I hate using strings here, look into python "enums"``
+        # TODO: I hate using strings here, look into python "enums"
         # 
         # E.g. 
         # [
@@ -100,7 +140,8 @@ class Map:
         #   ["empty", "empty", "room", "connector", "room"]
         # ]
         # =====================================================================
-        
+        map_array = []
+
         # Get the height and width of the map by finding the mininum and
         # maximum x and y value
         # Why do we do this? We're going to index into an array. Array indices
@@ -122,8 +163,27 @@ class Map:
                 min_y = position.y
         height = (max_y - min_y) + 1 # Off by one, I am dumb
         width = (max_x - min_x) + 1
-        print(height)
-        print(width)
+
+        print(f"Height: {height}, Width: {width}")
+
+        for y in range(0, height):
+            map_array.append([])
+            for x in range(0, width):
+                map_array[y].append("empty")
+
+        # Assign dict values to the array
+        for key, value in map_dict.items():
+            position = Position.from_string(key)
+            non_negative_x = position.x - min_x
+            # Subtract from "max_y" otherwise the array will appear "upside down"
+            non_negative_y = max_y - (position.y - min_y)
+            map_array[non_negative_y][non_negative_x] = value
+            if position.x == 0 and position.y == 0:
+                self.player_location = Position(non_negative_x, non_negative_y)
+        
+        self.map_array = map_array
+
+
             
 
 
@@ -133,7 +193,7 @@ class Map:
 # =============================================================================
 class Room:
     forward = None
-    backward = None
+    back = None
     left = None
     right = None
 
@@ -142,9 +202,12 @@ second = Room()
 third = Room()
 fourth = Room()
 fifth = Room()
+sixth = Room()
+seventh = Room()
+eight = Room()
 
 first.forward = second
-second.backward = first
+second.back = first
 
 second.left = third
 third.right = second
@@ -153,8 +216,20 @@ second.right = fourth
 fourth.left = second
 
 second.forward = fifth
-fifth.backward = second
+fifth.back = second
+
+first.left = sixth
+sixth.right = first
+
+sixth.left = seventh
+seventh.right = sixth
+
+third.forward = eight
+eight.back = third
 
 map = Map()
 map.generate_map_from_first_room(first)
-# map.display()
+map.update_player("forward")
+map.update_player("left")
+map.update_player("forward")
+map.display()
